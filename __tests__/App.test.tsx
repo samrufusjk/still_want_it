@@ -13,10 +13,12 @@ jest.mock('@react-native-firebase/analytics', () => () => ({
 }));
 
 jest.mock('@react-native-firebase/auth', () => {
+  const anonymousUser = { uid: 'anonymous-user' };
   const authInstance = {
     createUserWithEmailAndPassword: jest.fn(),
-    currentUser: null,
+    currentUser: anonymousUser,
     onAuthStateChanged: jest.fn(() => jest.fn()),
+    signInAnonymously: jest.fn(() => Promise.resolve({ user: anonymousUser })),
     signInWithEmailAndPassword: jest.fn(),
     signOut: jest.fn(),
   };
@@ -25,18 +27,31 @@ jest.mock('@react-native-firebase/auth', () => {
 });
 
 jest.mock('@react-native-firebase/firestore', () => {
-  const firestoreInstance = {
-    collection: jest.fn(() => ({
-      doc: jest.fn(() => ({
-        onSnapshot: jest.fn(() => jest.fn()),
-        set: jest.fn(),
-      })),
+  const query = {
+    onSnapshot: jest.fn((onNext: (value: { docs: [] }) => void) => {
+      onNext({ docs: [] });
+      return jest.fn();
+    }),
+  };
+  const collectionRef = {
+    add: jest.fn(() => Promise.resolve()),
+    doc: jest.fn(() => ({
+      onSnapshot: jest.fn(() => jest.fn()),
+      set: jest.fn(),
+      update: jest.fn(() => Promise.resolve()),
     })),
+    where: jest.fn(() => query),
+  };
+  const firestoreInstance = {
+    collection: jest.fn(() => collectionRef),
   };
 
   return Object.assign(() => firestoreInstance, {
     FieldValue: {
       serverTimestamp: jest.fn(() => 'timestamp'),
+    },
+    Timestamp: {
+      fromDate: jest.fn((value: Date) => value),
     },
   });
 });

@@ -6,6 +6,11 @@ import messaging, {
   FirebaseMessagingTypes,
 } from '@react-native-firebase/messaging';
 
+export type ReminderNotificationRoute = {
+  itemId: string;
+  type: 'decision';
+};
+
 export type PushRegistrationResult = {
   status: 'authorized' | 'provisional' | 'denied';
   token?: string;
@@ -32,6 +37,26 @@ export async function handleBackgroundMessage(
 ) {
   console.log('Background push received', formatRemoteMessage(remoteMessage));
   await analytics().logEvent('push_received_background');
+}
+
+function resolveNotificationData(
+  remoteMessage: Pick<FirebaseMessagingTypes.RemoteMessage, 'data'> | null,
+) {
+  if (!remoteMessage?.data) {
+    return null;
+  }
+
+  const type = remoteMessage.data.type;
+  const itemId = remoteMessage.data.itemId;
+
+  if (type !== 'decision_reminder' || typeof itemId !== 'string' || !itemId) {
+    return null;
+  }
+
+  return {
+    itemId,
+    type: 'decision' as const,
+  };
 }
 
 async function requestAndroidNotificationPermission() {
@@ -93,6 +118,7 @@ export async function syncTokenToSignedInUser(
         email: user.email,
         fcmToken: token,
         lastNotificationPermission: permissionStatus ?? null,
+        reminderDelivery: 'fcm',
         updatedAt: firestore.FieldValue.serverTimestamp(),
       },
       { merge: true },
@@ -105,4 +131,38 @@ export async function subscribeToTopic(topic: string) {
 
 export async function unsubscribeFromTopic(topic: string) {
   await messaging().unsubscribeFromTopic(topic);
+}
+
+export function getNotificationRoute(
+  remoteMessage: Pick<FirebaseMessagingTypes.RemoteMessage, 'data'> | null,
+) {
+  return resolveNotificationData(remoteMessage);
+}
+
+export function observeNotificationOpens({
+  onForegroundMessage,
+  onOpen,
+}: {
+  onForegroundMessage: (remoteMessage: FirebaseMessagingTypes.RemoteMessage) => void;
+  onOpen: (route: ReminderNotificationRoute | null) => void;
+}) {
+  const unsubscribeForeground = messaging().onMessage(async remoteMessage => {
+    onForegroundMessage(remoteMessage);
+    await analytics().logEvent('push_received_foreground');
+  });
+
+  const unsubscribeOpened = messaging().onNotificationOpenedApp(remoteMessage => {
+    onOpen(resolveNotificationData(remoteMessage));
+  });
+
+  messaging()
+    .getInitialNotification()
+    .then(remoteMessage => {
+      onOpen(resolveNotificationData(remoteMessage));
+    });
+
+  return () => {
+    unsubscribeForeground();
+    unsubscribeOpened();
+  };
 }
